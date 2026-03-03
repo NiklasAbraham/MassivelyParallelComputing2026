@@ -13,6 +13,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cmath>
 #include <cuda_runtime.h>
 
 #include "PPM.hh"
@@ -27,19 +28,8 @@ void checkCUDAError(const char* msg);
 
 //-------------------------------------------------------------------------------
 
-// specify the gamma value to be applied
-__device__ __constant__ float gpuGamma[1];
-
-__device__ float applyGamma(const float& _src, const float _gamma)
-{
-    return 255.0f * __powf(_src / 255.0f, _gamma);
-}
-
-/* compute gamma correction on the float image _src of resolution dim,
- outputs the gamma corrected image should be stored in_dst[blockIdx.x *
- blockDim.x + threadIdx.x]. Each thread computes on pixel element.
- */
-__global__ void gammaKernel(float* _dst, const float* _src, int _w)
+// compute absolute difference between two images
+__global__ void diffKernel(float* _dst, const float* _src1, const float* _src2, int _w)
 {
     int x = blockIdx.x * MAX_THREADS + threadIdx.x;
     int y = blockIdx.y;
@@ -47,7 +37,9 @@ __global__ void gammaKernel(float* _dst, const float* _src, int _w)
 
     if (x < _w)
     {
-        _dst[pos] = applyGamma(_src[pos], gpuGamma[0]);
+        float v1 = _src1[pos];
+        float v2 = _src2[pos];
+        _dst[pos] = fabsf(v1 - v2);
     }
 }
 
@@ -59,53 +51,67 @@ int main(int argc, char* argv[])
 
     if (argc < 4)
     {
-        printf("usage: %s <inImg> <gamma> <outImg>\n", argv[0]);
+        printf("usage: %s <inImg1> <inImg2> <outImg>\n", argv[0]);
         exit(1);
     }
 
-    float* img;
+    float* img1;
+    float* img2;
 
     bool success = true;
-    int w, h;
-    success &= readPPM(argv[acount++], w, h, &img);
-    if (!success) {
+    int w1, h1, w2, h2;
+    success &= readPPM(argv[acount++], w1, h1, &img1);
+    success &= readPPM(argv[acount++], w2, h2, &img2);
+    if (!success)
+    {
+        fprintf(stderr, "Error reading input images.\n");
+        exit(1);
+    }
+    if (w1 != w2 || h1 != h2)
+    {
+        fprintf(stderr, "Input images must have the same size.\n");
         exit(1);
     }
 
-    float gamma = atof(argv[acount++]);
-
+    int w = w1;
+    int h = h1;
     int nPix = w * h;
 
-    float* gpuImg;
+    float* gpuImg1;
+    float* gpuImg2;
     float* gpuResImg;
 
     //-------------------------------------------------------------------------------
     printf("Executing the GPU Version\n");
-    // copy the image to the device
-    cudaMalloc((void**)&gpuImg, nPix * 3 * sizeof(float));
-    cudaMalloc((void**)&gpuResImg, nPix * 3 * sizeof(float));
-    cudaMemcpy(gpuImg, img, nPix * 3 * sizeof(float), cudaMemcpyHostToDevice);
 
-    // copy gamma value to constant device memory
-    cudaMemcpyToSymbol(gpuGamma, &gamma, sizeof(float));
+    cudaMalloc((void**)&gpuImg1, nPix * 3 * sizeof(float));
+    cudaMalloc((void**)&gpuImg2, nPix * 3 * sizeof(float));
+    cudaMalloc((void**)&gpuResImg, nPix * 3 * sizeof(float));
+
+    cudaMemcpy(gpuImg1, img1, nPix * 3 * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(gpuImg2, img2, nPix * 3 * sizeof(float), cudaMemcpyHostToDevice);
 
     // calculate the block dimensions
     dim3 threadBlock(MAX_THREADS);
     // select the number of blocks vertically (*3 because of RGB)
-    dim3 blockGrid((w * 3) / MAX_THREADS + 1, h, 1);
+    dim3 blockGrid((w * 3 + MAX_THREADS - 1) / MAX_THREADS, h, 1);
     printf("bl/thr: %d  %d %d\n", blockGrid.x, blockGrid.y, threadBlock.x);
 
-    gammaKernel<<<blockGrid, threadBlock>>>(gpuResImg, gpuImg, w * 3);
+    diffKernel<<<blockGrid, threadBlock>>>(gpuResImg, gpuImg1, gpuImg2, w * 3);
+
+    checkCUDAError("kernel execution");
 
     // download result
-    cudaMemcpy(img, gpuResImg, nPix * 3 * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(img1, gpuResImg, nPix * 3 * sizeof(float), cudaMemcpyDeviceToHost);
 
     cudaFree(gpuResImg);
-    cudaFree(gpuImg);
+    cudaFree(gpuImg1);
+    cudaFree(gpuImg2);
 
-    writePPM(argv[acount++], w, h, (float*)img);
+    writePPM(argv[acount++], w, h, img1);
 
-    delete[] img;
+    delete[] img1;
+    delete[] img2;
 
     checkCUDAError("end of program");
 

@@ -48,6 +48,8 @@ void checkCUDAError(const char* msg);
 // Part 3 of 5: implement the kernel
 __global__ void myFirstKernel(int* d_a)
 {
+    unsigned int idx =blockIdx.x*blockDim.x + threadIdx.x;
+    d_a[idx] = 1000 * blockIdx.x + threadIdx.x;
 
 }
 
@@ -69,26 +71,26 @@ int main(int argc, char** argv)
     // Part 1 of 5: allocate host and device memory
     size_t memSize = numBlocks * numThreadsPerBlock * sizeof(int);
     h_a = reinterpret_cast<int*>(malloc(memSize));
-    cudaMalloc();
+    cudaMalloc((void**)&d_a, memSize);
 
     // Part 2 of 5: configure and launch kernel
-    dim3 dimGrid();
-    dim3 dimBlock();
-    myFirstKernel<<<,>>>();
+    dim3 dimGrid(numBlocks);
+    dim3 dimBlock(numThreadsPerBlock);
+    myFirstKernel<<<dimGrid, dimBlock>>>(d_a);
 
     // check if kernel execution generated an error
     checkCUDAError("kernel execution");
 
     // Part 4 of 5: device to host copy
-    cudaMemcpy();
+    cudaMemcpy(h_a, d_a, memSize, cudaMemcpyDeviceToHost);
 
     // Check for any CUDA errors
     checkCUDAError("cudaMemcpy");
 
     // Part 5 of 5: verify the data returned to the host is correct
-    for (int i = 0; i < ; i++)
+    for (int i = 0; i < numBlocks; i++)
     {
-        for (int j = 0; j < ; j++)
+        for (int j = 0; j < numThreadsPerBlock; j++)
         {
             assert(h_a[i * numThreadsPerBlock + j] == 1000 * i + j);
         }

@@ -49,7 +49,9 @@ void munchComments(istream& instream)
 bool readPPM(const char* _fname, int& _w, int& _h, float** _data)
 {
 
-    std::ifstream in(_fname);
+    // std::ifstream in(_fname,);
+    // HAD TO CHANGE THIS TO MAKE IT WORK ON WINDOWS!!
+    std::ifstream in(_fname, std::ios::binary);
 
     char P;
     in >> P;

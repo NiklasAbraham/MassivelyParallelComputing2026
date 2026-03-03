@@ -67,14 +67,14 @@ int main(int argc, char** argv)
 
     // Part 1 of 5: allocate device memory
     size_t memSize = dimA * sizeof(float);
-    cudaMalloc();
-    cudaMalloc();
+    cudaMalloc((void**)&d_a, memSize);
+    cudaMalloc((void**)&d_b, memSize);
 
     // Part 2 of 5: host to device memory copy
-    cudaMemcpy();
+    cudaMemcpy(d_a, h_a, memSize, cudaMemcpyHostToDevice);
 
     // Part 3 of 5: device to device memory copy
-    cudaMemcpy();
+    cudaMemcpy(d_b, d_a, memSize, cudaMemcpyDeviceToDevice);
 
     // clear host memory
     for (size_t n = 0; n < dimA; n++)
@@ -83,7 +83,7 @@ int main(int argc, char** argv)
     }
 
     // Part 4 of 5: device to host copy
-    cudaMemcpy();
+    cudaMemcpy(h_a, d_b, memSize, cudaMemcpyDeviceToHost);
 
     // Check for any CUDA errors
     checkCUDAError("cudaMemcpy calls");
@@ -95,8 +95,8 @@ int main(int argc, char** argv)
     }
 
     // Part 5 of 5: free device memory pointers d_a and d_b
-    cudaFree();
-    cudaFree();
+    cudaFree(d_a);
+    cudaFree(d_b);
 
     // Check for any CUDA errors
     checkCUDAError("cudaFree");

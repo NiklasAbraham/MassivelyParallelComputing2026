@@ -15,6 +15,8 @@
 #include <cstdlib>
 #include <cuda_runtime.h>
 
+#include <random>
+
 using namespace std;
 
 // Simple utility function to check for CUDA runtime errors
@@ -23,7 +25,7 @@ void checkCUDAError(const char* msg);
 #define MAX_BLOCKS 256
 #define MAX_THREADS 128
 
-#define RTEST // use random initialization of array
+// #define RTEST // use random initialization of array
 
 /* compute the dot product between a1 and a2. a1 and a2 are of size
  dim. The result of each thread should be stored in _dst[blockIdx.x *
@@ -35,6 +37,15 @@ __global__ void dotProdKernel(float* _dst, const float* _a1, const float* _a2, i
 
     // program your kernel here
     //!!!!!!!!! missing  !!!!!!!!!!!!!!!!!!!!!!!!
+    unsigned int resIdx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int stride = MAX_BLOCKS * MAX_THREADS;
+    float sum = 0.f;
+
+    for (unsigned int i =resIdx; i < _dim; i += stride){
+        sum += (_a1[i] * _a2[i]);
+    }
+
+    _dst[resIdx] = sum;
 }
 
 /* This program sets up two large arrays of size dim and computes the
@@ -88,11 +99,19 @@ int main(int argc, char* argv[])
     {
         // allocate two gpuArray 1 and gpuArray 2 and gpuResult array on GPU
 
+        unsigned int memSize = dim * sizeof(float);
         //!!!!!!!!! missing  !!!!!!!!!!!!!!!!!!!!!!!!
+        cudaMalloc((void**)&gpuArray1, memSize);
+        cudaMalloc((void**)&gpuArray2, memSize);
+
+        cudaMalloc((void**)&gpuResult, MAX_BLOCKS * MAX_THREADS * sizeof(float));
 
         // copy the array once to the device
 
         //!!!!!!!!! missing  !!!!!!!!!!!!!!!!!!!!!!!!
+
+        cudaMemcpy(gpuArray1, cpuArray1, memSize, cudaMemcpyHostToDevice);
+        cudaMemcpy(gpuArray2, cpuArray2, memSize, cudaMemcpyHostToDevice);
 
         // allocate an array to download the results of all threads
         h = new float[MAX_BLOCKS * MAX_THREADS];
@@ -131,6 +150,12 @@ int main(int argc, char* argv[])
         // download and combine the results of multiple threads on the CPU
 
         //!!!!!!!!! missing  !!!!!!!!!!!!!!!!!!!!!!!!
+        cudaMemcpy(h, gpuResult, MAX_BLOCKS * MAX_THREADS * sizeof(float), cudaMemcpyDeviceToHost); 
+        
+        finalDotProduct  = 0.0;
+        for (int i =0; i < MAX_BLOCKS * MAX_THREADS; ++i){
+            finalDotProduct += h[i];
+        }
     }
 
     printf("Result: %f\n", finalDotProduct);
@@ -141,6 +166,9 @@ int main(int argc, char* argv[])
         // cleanup GPU memory
 
         //!!!!!!!!! missing  !!!!!!!!!!!!!!!!!!!!!!!!
+        cudaFree(gpuArray1);
+        cudaFree(gpuArray2);
+        cudaFree(gpuResult);
 
         delete[] h;
     }

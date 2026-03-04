@@ -18,12 +18,11 @@
     \brief provides ppm reader and writer functions
  */
 
-namespace ppm
-{
+namespace ppm {
 
-bool readPPM(const char* _fname, int& _w, int& _h, float** _data);
+bool readPPM(const char *_fname, int &_w, int &_h, float **_data);
 
-bool writePPM(const char* _fname, int _w, int _h, float* _data);
+bool writePPM(const char *_fname, int _w, int _h, float *_data);
 
 } // namespace ppm
 

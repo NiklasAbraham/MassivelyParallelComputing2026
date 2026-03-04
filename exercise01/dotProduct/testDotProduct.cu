@@ -32,9 +32,15 @@ void checkCUDAError(const char* msg);
  */
 __global__ void dotProdKernel(float* _dst, const float* _a1, const float* _a2, int _dim)
 {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int totalThreads = gridDim.x * blockDim.x;
 
-    // program your kernel here
-    //!!!!!!!!! missing  !!!!!!!!!!!!!!!!!!!!!!!!
+    float sum = 0.0f;
+    for (int i = tid; i < _dim; i += totalThreads)
+    {
+        sum += _a1[i] * _a2[i];
+    }
+    _dst[tid] = sum;
 }
 
 /* This program sets up two large arrays of size dim and computes the
@@ -87,12 +93,13 @@ int main(int argc, char* argv[])
     if (gpuVersion)
     {
         // allocate two gpuArray 1 and gpuArray 2 and gpuResult array on GPU
-
-        //!!!!!!!!! missing  !!!!!!!!!!!!!!!!!!!!!!!!
+        cudaMalloc((void**)&gpuArray1, dim * sizeof(float));
+        cudaMalloc((void**)&gpuArray2, dim * sizeof(float));
+        cudaMalloc((void**)&gpuResult, MAX_BLOCKS * MAX_THREADS * sizeof(float));
 
         // copy the array once to the device
-
-        //!!!!!!!!! missing  !!!!!!!!!!!!!!!!!!!!!!!!
+        cudaMemcpy(gpuArray1, cpuArray1, dim * sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemcpy(gpuArray2, cpuArray2, dim * sizeof(float), cudaMemcpyHostToDevice);
 
         // allocate an array to download the results of all threads
         h = new float[MAX_BLOCKS * MAX_THREADS];
@@ -129,18 +136,22 @@ int main(int argc, char* argv[])
         }
 
         // download and combine the results of multiple threads on the CPU
-
-        //!!!!!!!!! missing  !!!!!!!!!!!!!!!!!!!!!!!!
+        cudaMemcpy(h, gpuResult, MAX_BLOCKS * MAX_THREADS * sizeof(float), cudaMemcpyDeviceToHost);
+        finalDotProduct = 0.0;
+        for (int i = 0; i < MAX_BLOCKS * MAX_THREADS; ++i)
+        {
+            finalDotProduct += h[i];
+        }
     }
 
     printf("Result: %f\n", finalDotProduct);
 
     if (gpuVersion)
     {
-
         // cleanup GPU memory
-
-        //!!!!!!!!! missing  !!!!!!!!!!!!!!!!!!!!!!!!
+        cudaFree(gpuArray1);
+        cudaFree(gpuArray2);
+        cudaFree(gpuResult);
 
         delete[] h;
     }

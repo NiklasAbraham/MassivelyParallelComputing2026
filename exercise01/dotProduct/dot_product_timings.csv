@@ -1,0 +1,9 @@
+exercise,config,dim,time_seconds
+dotProduct,cpu,10000,0.008070
+dotProduct,gpu,10000,0.072755
+dotProduct,cpu,1000000,0.109460
+dotProduct,gpu,1000000,0.081315
+dotProduct,cpu,10000000,1.085923
+dotProduct,gpu,10000000,0.213540
+dotProduct,cpu,100000000,10.986996
+dotProduct,gpu,100000000,1.480444

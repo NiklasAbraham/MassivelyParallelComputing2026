@@ -140,9 +140,114 @@ __global__ void featureKernel(int* _dst, cudaTextureObject_t texImg, int _w, int
     }
 }
 
-// !!! missing !!!
-// Kernels for Prefix Sum calculation (compaction, spreading, possibly shifting)
-// and for generating the gpuFeatureList from the prefix sum.
+__global__ void prefixReduceScanlines(const int* _featureImg, int* _prefixShiftedPlusOne, int _w, int _h)
+{
+    int y = blockIdx.y;
+    if (y >= _h)
+    {
+        return;
+    }
+
+    int x = threadIdx.x;
+    if (x >= _w)
+    {
+        return;
+    }
+
+    __shared__ int sData[THREADS];
+
+    int idx = y * _w + x;
+    sData[x] = _featureImg[idx];
+    __syncthreads();
+
+    // Hillis-Steele inclusive scan within each scanline
+    for (int offset = 1; offset < _w; offset <<= 1)
+    {
+        int val = sData[x];
+        if (x >= offset)
+        {
+            val += sData[x - offset];
+        }
+        __syncthreads();
+        sData[x] = val;
+        __syncthreads();
+    }
+
+    // Write per-scanline inclusive prefix sums to the shifted array
+    _prefixShiftedPlusOne[y * _w + x] = sData[x];
+}
+
+// Scan the per-scanline sums (last elements of each scanline)
+// that are already stored at indices (row + 1) * _w in the
+// shifted prefix array. This produces global row-prefix sums.
+__global__ void prefixScanRowSums(int* _prefixShifted, int _w, int _h)
+{
+    __shared__ int sData[THREADS];
+
+    int tid = threadIdx.x;
+
+    if (tid < _h)
+    {
+        // Last element of scanline 'tid' is at index (tid + 1) * _w
+        sData[tid] = _prefixShifted[(tid + 1) * _w];
+    }
+    else
+    {
+        sData[tid] = 0;
+    }
+    __syncthreads();
+
+    // Hillis-Steele inclusive scan over the row sums
+    for (int offset = 1; offset < _h; offset <<= 1)
+    {
+        int val = sData[tid];
+        if (tid >= offset)
+        {
+            val += sData[tid - offset];
+        }
+        __syncthreads();
+        sData[tid] = val;
+        __syncthreads();
+    }
+
+    if (tid < _h)
+    {
+        // Store back the global prefix sum for the end of each scanline
+        _prefixShifted[(tid + 1) * _w] = sData[tid];
+    }
+}
+
+__global__ void prefixAddRowOffsets(int* _prefixShifted, int _w, int _h)
+{
+    int y = blockIdx.y;
+    int x = threadIdx.x;
+
+    if (y >= _h || x >= _w - 1)
+    {
+        return;
+    }
+
+    int offset = _prefixShifted[y * _w]; // global prefix sum before this scanline
+    int idx = 1 + y * _w + x;            
+
+    _prefixShifted[idx] += offset;
+}
+
+__global__ void compactKernel(const int* _featureImg, const int* _prefixShifted, int* _featureList, int _nPix)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= _nPix)
+    {
+        return;
+    }
+
+    if (_featureImg[i] != 0)
+    {
+        int outIdx = _prefixShifted[i];
+        //  gpuFeatureList[k] = i   (pixel index i that is the k-th feature)
+        _featureList[outIdx] = i;
+    }
+}
 
 /* This program detects the local maxima in an image, writes their
 location into a vector and then computes the Voronoi diagram of the
@@ -279,16 +384,30 @@ int main(int argc, char* argv[])
         // GPU compaction:
         ////////////////////////////////////////////////////////////
 
-        // !!! missing !!!
-        // implement the prefixSum algorithm
-        // 1. Do the reduction step for all scanlines, one scanline per block.
+        // 0. Initialize first element of shifted prefix sum array to 0
+        cudaMemset(gpuPrefixSumShifted, 0, sizeof(int));
+
+        // 1. Do the reduction (scan) step for all scanlines, one scanline per block.
+        prefixReduceScanlines<<<blockGrid, threadBlock>>>(gpuFeatureImg, gpuPrefixSumShifted + 1, w, h);
+
         // 2. Do the reduction step for the last elements of all scanlines, all in one block.
         // 3. Do the spreading step for the last elements of all scanlines, all in one block.
-        //    -> The last elements / elements before the scanlines have the right values now.
-        // 4. Do the spreading step for all scanlines, one scanline per block.
+        prefixScanRowSums<<<1, THREADS>>>(gpuPrefixSumShifted, w, h);
 
-        // Make sure that gpuFeatureList is filled according to the CPU implementation
-        // and that nFeatures has the correct value!
+        // 4. Do the spreading step for all scanlines, one scanline per block.
+        prefixAddRowOffsets<<<blockGrid, threadBlock>>>(gpuPrefixSumShifted, w, h);
+
+        checkCUDAError("prefix sum computation");
+
+        // The total number of features is stored in the last element of the shifted prefix array.
+        cudaMemcpy(&nFeatures, gpuPrefixSumShifted + nPix, sizeof(int), cudaMemcpyDeviceToHost);
+
+        // Compact the feature image into a dense list using the prefix sum.
+        dim3 compactBlock(THREADS);
+        dim3 compactGrid((nPix + THREADS - 1) / THREADS, 1, 1);
+        compactKernel<<<compactGrid, compactBlock>>>(gpuFeatureImg, gpuPrefixSumShifted, gpuFeatureList, nPix);
+
+        checkCUDAError("compaction");
     }
 
     // now compute the Voronoi Diagram around the detected features.

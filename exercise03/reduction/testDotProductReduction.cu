@@ -57,7 +57,47 @@ __global__ void dotProdKernel(float* dst, const float* a1, const float* a2, int 
 __global__ void reduceKernel(float* dst, const float* src, int dim)
 {
 
-    
+    // from the slides in version 2
+    __shared__ float volatile partialSum[MAX_THREADS];
+
+    unsigned int t = threadIdx.x;
+    unsigned int i = blockIdx.x * blockDim.x + t;
+
+    // load input into shared memory (or 0 if out of range)
+    partialSum[t] = (i < dim) ? src[i] : 0.0f;
+    __syncthreads();
+
+    for (unsigned int stride = blockDim.x / 2; stride > 32; stride >>= 1) // step down by 2
+    {
+        __syncthreads();
+
+        if (t < stride)
+            partialSum[t] += partialSum[t+stride];
+    }
+    __syncthreads();
+
+    /*
+    // unroll last 6 predicated steps
+    // simple first solution
+    if (t <= 32) {
+        partialSum[t] += partialSum[t + 32];
+        partialSum[t] += partialSum[t + 16];
+        partialSum[t] += partialSum[t + 8];
+        partialSum[t] += partialSum[t + 4];
+        partialSum[t] += partialSum[t + 2];
+        partialSum[t] += partialSum[t + 1];
+    }
+    __syncthreads();
+
+    if (t == 0)
+        dst[blockIdx.x] = partialSum[0];
+    */
+    float value = partialSum[t];
+    for (int i=1; i<32; i*=2)
+        value += __shfl_xor_sync(0xffffffffu, value, i);
+
+    if (t == 0)
+        dst[blockIdx.x] = value;
 }
 
 
@@ -128,10 +168,10 @@ int main(int argc, char* argv[])
     cudaMalloc((void**)&gpuArray2, dim * sizeof(float));
 
     cudaMalloc((void**)&gpuResult1, MAX_BLOCKS * MAX_THREADS * sizeof(float));
-
-    cudaMalloc((void**)&gpuResult2,
-               MAX_BLOCKS * MAX_THREADS
-                   * sizeof(float)); // MAX_BLOCKS elements would be sufficient here...
+    cudaMalloc((void**)&gpuResult2, MAX_BLOCKS * MAX_THREADS * sizeof(float));
+    
+    float* gpuReducedResult;
+    cudaMalloc((void**)&gpuReducedResult, MAX_BLOCKS * sizeof(float));
 
     // Upload input data
 
@@ -187,10 +227,15 @@ int main(int argc, char* argv[])
             // call the dot kernel, store result in gpuResult1
             dotProdKernel<<<blockGrid, threadBlock>>>(gpuResult1, gpuArray1, gpuArray2, dim);
 
-            // !!! missing !!!
-            // Reduce all the dot product summands to one single value,
-            // download it to a float and use it to set finalDotProduct.
-
+            // reduce over partial results: first dim elements are valid (rest are 0)
+            expectedResultSize = (unsigned int)min(dim, MAX_THREADS * MAX_BLOCKS);
+            reduceKernel<<<blockGrid, threadBlock>>>(gpuResult2, gpuResult1, expectedResultSize);
+            reduceKernel<<<1, MAX_THREADS>>>(gpuReducedResult, gpuResult2, MAX_BLOCKS);
+            {
+                float reducedFloat = 0.f;
+                cudaMemcpy(&reducedFloat, gpuReducedResult, sizeof(float), cudaMemcpyDeviceToHost);
+                finalDotProduct = (double)reducedFloat;
+            }
             break;
 
         } // end switch
@@ -204,6 +249,7 @@ int main(int argc, char* argv[])
     printf("Time: %f\n", (float)runTime / 1000000000.0f);
 
     // cleanup GPU memory
+    cudaFree(gpuReducedResult);
     cudaFree(gpuResult1);
     cudaFree(gpuResult2);
     cudaFree(gpuArray2);

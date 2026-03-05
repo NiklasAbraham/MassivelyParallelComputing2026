@@ -445,3 +445,25 @@ void checkCUDAError(const char* msg)
         exit(-1);
     }
 }
+
+
+
+/*
+gpuFeatureImg (binary, sparse)
+  [0,1,0,0,1,1,0,1,...]
+
+
+        | prefix scan -> positions
+
+        
+gpuPrefixSumShifted (exclusive, shifted)
+  [0,0,1,1,1,2,3,3,...]
+
+
+        | scatter indices
+        
+
+gpuFeatureList (dense)
+  [1,4,5,7,...]
+
+*/

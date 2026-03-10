@@ -1,0 +1,5 @@
+Implement two square matrix multiplications:
+– multiplyMatrixGpuBasic(...) should calculate one element per thread by reading the input
+data trivially from global memory.
+– multiplyMatrixGpuSharedMemory(...) should also calculate one element per thread, but
+blocks should cooperate to read common input data to shared memory first.
